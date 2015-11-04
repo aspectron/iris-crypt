@@ -247,11 +247,6 @@ std::vector<std::string> package::names() const
 
 v8::Local<v8::Value> package::require_module(v8::Isolate* isolate, module_name const& name, std::string const& source)
 {
-	if (name.file.extension() == ".json")
-	{
-		return v8::JSON::Parse(v8pp::to_v8(isolate, source));
-	}
-
 	// re-define require() function in a wrapped source
 	// because for some reason V8 can't reference it
 	// from this package object prototype
@@ -310,7 +305,7 @@ v8::Local<v8::Value> package::require_module(v8::Isolate* isolate, module_name c
 	return exports;
 }
 
-v8::Local<v8::Value> package::require_other(v8::Isolate* isolate, std::string const& name)
+v8::Local<v8::Value> package::require_original(v8::Isolate* isolate, std::string const& name)
 {
 	// load node module using original require function
 	v8::Local<v8::Object> module = v8pp::to_local(isolate, node_module);
@@ -339,6 +334,15 @@ void package::require(v8::FunctionCallbackInfo<v8::Value> const& args)
 		name.dir = (require_dir_stack_.top() / name.id).parts().first;
 	}
 
+	auto it = modules_.find(name);
+	if (it == modules_.end())
+	{
+		args.GetReturnValue().Set(require_original(isolate, name.id));
+		return;
+	}
+	name = it->first;
+	std::string& source = it->second;
+
 	v8::EscapableHandleScope scope(isolate);
 
 	v8::Local<v8::Object> js_modules = v8pp::to_local(isolate, js_modules_);
@@ -346,23 +350,19 @@ void package::require(v8::FunctionCallbackInfo<v8::Value> const& args)
 	v8::Local<v8::Value> js_module = js_modules->Get(js_name);
 	if (js_module.IsEmpty() || js_module->IsUndefined())
 	{
-		auto it = modules_.find(name);
-		if (it == modules_.end())
+		if (name.file.extension() == ".json")
 		{
-			js_module = require_other(isolate, name.id);
+			js_module = v8::JSON::Parse(v8pp::to_v8(isolate, source));
 		}
 		else
 		{
-			require_dir_stack_.push((it->first.dir / it->first.file).parts().first);
-			js_module = require_module(isolate, it->first, it->second);
+			require_dir_stack_.push((name.dir / name.file).parent());
+			js_module = require_module(isolate, name, source);
 			require_dir_stack_.pop();
-			it->second.clear();
-			it->second.shrink_to_fit();
 		}
-		if (!js_module.IsEmpty() && !js_module->IsUndefined())
-		{
-			js_modules->Set(js_name, js_module);
-		}
+		source.clear();
+		source.shrink_to_fit();
+		js_modules->Set(js_name, js_module);
 	}
 	args.GetReturnValue().Set(scope.Escape(js_module));
 }

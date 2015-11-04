@@ -61,5 +61,5 @@ private:
 	static void load_file(v8::Isolate* isolate, modules_map& modules, std::string const& id, path p, path base);
 
 	v8::Local<v8::Value> require_module(v8::Isolate* isolate, module_name const& name, std::string const& source);
-	v8::Local<v8::Value> require_other(v8::Isolate* isolate, std::string const& name);
+	v8::Local<v8::Value> require_original(v8::Isolate* isolate, std::string const& name);
 };
