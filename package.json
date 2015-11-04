@@ -1,0 +1,8 @@
+{
+    "name": "iris-crypt",
+    "version": "0.0.1",
+    "description": "Encrypt Node.js modules into a single package file",
+    "private": true,
+    "main": "./main.js",
+    "engines" : { "node" : "0.12" }
+}
