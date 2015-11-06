@@ -13,6 +13,9 @@ public:
 	path(std::string const& str);
 	path(char const* str);
 
+	bool operator==(path const& rhs) const { return str_ == rhs.str_; }
+	bool operator!=(path const& rhs) const { return str_ != rhs.str_; }
+
 	template<typename Archive>
 	void serialize(Archive& ar) { ar & str_; }
 
@@ -32,10 +35,12 @@ public:
 	path base() const { return parts().second; }
 
 	std::string extension() const;
-	void set_extension(std::string const& ext);
+	void add_extension(std::string const& ext);
 
 	path relative_to(path const& base) const;
 
+	std::vector<path> list_files() const;
+	std::string content() const;
 	static path current();
 private:
 	void normalize();
@@ -43,6 +48,19 @@ private:
 	static const char sep;
 	std::string str_;
 };
+
+namespace std {
+
+template<>
+struct hash<path> : hash<std::string>
+{
+	result_type operator()(path const& arg) const
+	{
+		return hash<std::string>::operator()(arg.str());
+	}
+};
+
+} // std
 
 namespace v8pp {
 

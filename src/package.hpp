@@ -2,7 +2,7 @@
 
 #include <string>
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <tuple>
 #include <stack>
 
@@ -29,37 +29,22 @@ public:
 	std::vector<std::string> names() const;
 
 private:
-	struct module_name
-	{
-		std::string id;
-		path dir, file;
-
-		module_name() = default;
-
-		bool is_root() const { return id[0] != '.'; }
-
-		bool operator<(module_name const& rhs) const
-		{
-			return std::tie(id, dir.str()) < std::tie(rhs.id, rhs.dir.str());
-		}
-
-		template<typename Archive>
-		void serialize(Archive& ar)
-		{
-			ar & id & dir & file;
-		}
-	};
-
 	std::string pub_key_;
 	uint16_t serial_number_;
 	v8::UniquePersistent<v8::Object> js_modules_;
 
-	using modules_map = std::map<module_name, std::string>;
+	using sources_map = std::unordered_map<path, std::string>;
+	sources_map sources_;
+
+	using modules_map = std::unordered_map<std::string, path>;
 	modules_map modules_;
+
 	std::stack<path> require_dir_stack_;
 
-	static void load_file(v8::Isolate* isolate, modules_map& modules, std::string const& id, path p, path base);
+	static void load_dir(v8::Isolate* isolate, modules_map& modules, sources_map& sources, std::string const& id, path const& p);
+	static void load_file(modules_map& modules, sources_map& sources, std::string const& id, path const& p);
 
-	v8::Local<v8::Value> require_module(v8::Isolate* isolate, module_name const& name, std::string const& source);
-	v8::Local<v8::Value> require_original(v8::Isolate* isolate, std::string const& name);
+	v8::Local<v8::Value> require_module(v8::Isolate* isolate, std::string const& id,
+		path const& file, std::string const& source);
+	v8::Local<v8::Value> require_original(v8::Isolate* isolate, std::string const& id);
 };

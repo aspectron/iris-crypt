@@ -1,7 +1,7 @@
 var path = require('path');
 
 var utils = require("./utils");
-//var lib = require(path.join(__dirname, 'lib'));
+var lib = require(path.join(__dirname, 'lib'));
 
 exports.version = require('../package.json').version;
 exports.name = require('../package.json').name;

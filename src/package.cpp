@@ -3,10 +3,7 @@
 
 #include <algorithm>
 #include <iterator>
-#include <string>
 #include <numeric>
-#include <fstream>
-#include <regex>
 
 #pragma warning(push, 3)
 #include <node_buffer.h>
@@ -167,15 +164,18 @@ try
 	auto const filename = v8pp::from_v8<std::string>(isolate, args[1]);
 	auto const files = v8pp::from_v8<string_map>(isolate, args[2]);
 
+	sources_map sources;
 	modules_map modules;
 	for (auto const& file : files)
 	{
-		load_file(isolate, modules, file.first, file.second, {});
+		std::string const& id = file.first;
+		path const p = file.second;
+		p.is_dir() ? load_dir(isolate, modules, sources, id, p) : load_file(modules, sources, id, p);
 	}
 
-	yas::mem_ostream mem(modules.size() * 40 * 1024);
+	yas::mem_ostream mem(sources.size() * 40 * 1024);
 	yas::binary_oarchive<yas::mem_ostream> content(mem, yas::no_header);
-	content.serialize(modules);
+	content.serialize(modules, sources);
 
 	yas::intrusive_buffer const buf = mem.get_intrusive_buffer();
 	yas::shared_buffer const cipher = encrypt(isolate, auth.priv_key(), buf.data, buf.size);
@@ -219,7 +219,7 @@ try
 	yas::shared_buffer const plain = decrypt(isolate, auth.priv_key(), cipher.data.get(), cipher.size);
 	yas::mem_istream mem(plain);
 	yas::binary_iarchive<yas::mem_istream> content(mem, yas::no_header);
-	content.serialize(pkg->modules_);
+	content.serialize(pkg->modules_, pkg->sources_);
 
 	pkg->js_modules_.Reset(isolate, v8::Object::New(isolate));
 	v8::Local<v8::Object> result = v8pp::class_<package>::import_external(isolate, pkg.release());
@@ -233,19 +233,16 @@ catch (yas::io_exception const& ex)
 
 std::vector<std::string> package::names() const
 {
-	// list only root items
 	std::vector<std::string> result;
 	for (auto const& kv : modules_)
 	{
-		if (kv.first.is_root())
-		{
-			result.emplace_back(kv.first.id);
-		}
+		result.emplace_back(kv.first);
 	}
+	std::sort(result.begin(), result.end());
 	return result;
 }
 
-v8::Local<v8::Value> package::require_module(v8::Isolate* isolate, module_name const& name, std::string const& source)
+v8::Local<v8::Value> package::require_module(v8::Isolate* isolate, std::string const& id, path const& file, std::string const& source)
 {
 	// re-define require() function in a wrapped source
 	// because for some reason V8 can't reference it
@@ -265,7 +262,7 @@ v8::Local<v8::Value> package::require_module(v8::Isolate* isolate, module_name c
 	v8::TryCatch try_catch;
 
 	// compile and run wrapped source to get a wrapped JS function
-	v8::ScriptOrigin origin(v8pp::to_v8(isolate, name.file));
+	v8::ScriptOrigin origin(v8pp::to_v8(isolate, id));
 	v8::Local<v8::Script> script = v8::Script::Compile(v8pp::to_v8(isolate, wrapped_source), &origin);
 	if (try_catch.HasCaught())
 	{
@@ -284,15 +281,14 @@ v8::Local<v8::Value> package::require_module(v8::Isolate* isolate, module_name c
 	js_module->SetPrototype(v8pp::to_v8(isolate, this));
 
 	// setup the module object
-	path const fullname = name.dir / name.file;
 	v8::Local<v8::Object> exports = v8::Object::New(isolate);
 	v8pp::set_option(isolate, js_module, "exports", exports);
-	v8pp::set_const(isolate, js_module, "id", name.id);
-	v8pp::set_const(isolate, js_module, "filename", fullname);
+	v8pp::set_const(isolate, js_module, "id", id);
+	v8pp::set_const(isolate, js_module, "filename", file);
 	v8pp::set_option(isolate, js_module, "loaded", false);
 
 	// call wrapped function
-	v8pp::call_v8(isolate, wrapped_script, js_module, exports,js_module, fullname, name.dir);
+	v8pp::call_v8(isolate, wrapped_script, js_module, exports,js_module, file, file.parent());
 	if (try_catch.HasCaught())
 	{
 		try_catch.ReThrow();
@@ -305,13 +301,13 @@ v8::Local<v8::Value> package::require_module(v8::Isolate* isolate, module_name c
 	return exports;
 }
 
-v8::Local<v8::Value> package::require_original(v8::Isolate* isolate, std::string const& name)
+v8::Local<v8::Value> package::require_original(v8::Isolate* isolate, std::string const& id)
 {
 	// load node module using original require function
 	v8::Local<v8::Object> module = v8pp::to_local(isolate, node_module);
 	v8::Local<v8::Function> require = v8pp::to_local(isolate, node_require);
 	v8::TryCatch try_catch;
-	v8::Local<v8::Value> result = v8pp::call_v8(isolate, require, module, name);
+	v8::Local<v8::Value> result = v8pp::call_v8(isolate, require, module, id);
 	if (try_catch.HasCaught())
 	{
 		return try_catch.ReThrow();
@@ -323,41 +319,47 @@ void package::require(v8::FunctionCallbackInfo<v8::Value> const& args)
 {
 	v8::Isolate* isolate = args.GetIsolate();
 
-	module_name name;
-	name.id = v8pp::from_v8<std::string>(isolate, args[0], "");
-	if (name.id.empty())
+	std::string const id = v8pp::from_v8<std::string>(isolate, args[0], "");
+	if (id.empty())
 	{
 		throw std::runtime_error("name argument empty");
 	}
-	if (!name.is_root() && !require_dir_stack_.empty())
-	{
-		name.dir = (require_dir_stack_.top() / name.id).parts().first;
-	}
 
-	auto it = modules_.find(name);
-	if (it == modules_.end())
+	path name;
+	auto it = modules_.find(id);
+	if (it != modules_.end())
 	{
-		args.GetReturnValue().Set(require_original(isolate, name.id));
-		return;
+		name = it->second;
 	}
-	name = it->first;
-	std::string& source = it->second;
+	else
+	{
+		name = (id[0] == '.' && !require_dir_stack_.empty()? require_dir_stack_.top() / id : id);
+		name.add_extension(".js");
+	}
 
 	v8::EscapableHandleScope scope(isolate);
 
 	v8::Local<v8::Object> js_modules = v8pp::to_local(isolate, js_modules_);
-	v8::Local<v8::String> js_name = v8pp::to_v8(isolate, name.dir / name.id);
+	v8::Local<v8::String> js_name = v8pp::to_v8(isolate, name);
 	v8::Local<v8::Value> js_module = js_modules->Get(js_name);
 	if (js_module.IsEmpty() || js_module->IsUndefined())
 	{
-		if (name.file.extension() == ".json")
+		auto src = sources_.find(name);
+		if (src == sources_.end())
+		{
+			args.GetReturnValue().Set(require_original(isolate, id));
+			return;
+		}
+		std::string& source = src->second;
+
+		if (name.extension() == ".json")
 		{
 			js_module = v8::JSON::Parse(v8pp::to_v8(isolate, source));
 		}
 		else
 		{
-			require_dir_stack_.push((name.dir / name.file).parent());
-			js_module = require_module(isolate, name, source);
+			require_dir_stack_.push(name.parent());
+			js_module = require_module(isolate, id, name, source);
 			require_dir_stack_.pop();
 		}
 		source.clear();
@@ -367,67 +369,35 @@ void package::require(v8::FunctionCallbackInfo<v8::Value> const& args)
 	args.GetReturnValue().Set(scope.Escape(js_module));
 }
 
-void package::load_file(v8::Isolate* isolate, modules_map& modules, std::string const& id, path p, path base)
+void package::load_dir(v8::Isolate* isolate, modules_map& modules, sources_map& sources, std::string const& id, path const& p)
 {
-	if (base.empty()) base = p.parts().first;
+	path const base = p.parent();
+	path main = p / "index.js";
 
-	if (p.is_dir())
+	for (path const& file : p.list_files())
 	{
-		path const package = p / "package.json";
-		if (package.is_file())
+		std::string const content = file.content();
+		if (file.relative_to(p) == "package.json")
 		{
-			v8::HandleScope scope(isolate);
-
-			v8::Local<v8::Function> require = v8pp::to_local(isolate, node_require);
-			v8::Local<v8::Object> json = v8pp::call_v8(isolate, require,
-				v8pp::to_local(isolate, node_module), package).As<v8::Object>();
+			v8::Local<v8::Object> json = v8::JSON::Parse(v8pp::to_v8(isolate, content)).As<v8::Object>();
 			if (json.IsEmpty() || !json->IsObject())
 			{
-				throw std::runtime_error(id + ": can't load " + package.str());
+				throw std::runtime_error(id + ": can't load " + file.str());
 			}
-			path main;
 			if (!v8pp::get_option(isolate, json, "main", main))
 			{
-				throw std::runtime_error(id + ": no \"main\" in " + package.str());
+				throw std::runtime_error(id + ": no \"main\" in " + file.str());
 			}
-			p = p / main;
+			main = p / main;
+			main.add_extension(".js");
 		}
-		else
-		{
-			p = p / "index.js";
-		}
+		sources.emplace(file.relative_to(base), std::move(content));
 	}
+	modules.emplace(id, p.base() / main.relative_to(p));
+}
 
-	if (p.extension().empty())
-	{
-		p.set_extension(".js");
-	}
-
-	std::ifstream file(p.c_str());
-	if (!file.is_open())
-	{
-		throw std::runtime_error(id + ": can't open " + p.str());
-	}
-	std::istreambuf_iterator<char> begin(file), end;
-	std::string const source(begin, end);
-
-	module_name name;
-	name.id = id;
-	if (name.is_root())
-	{
-		name.file = p.relative_to(base);
-	}
-	else
-	{
-		std::tie(name.dir, name.file) = p.relative_to(base).parts();
-	}
-	modules.emplace(name, source);
-
-	p = p.parent();
-	std::regex re("require\\([\"\'](.*?[\\/\\/].*?)[\"\']\\)");
-	for (std::sregex_iterator it(source.begin(), source.end(), re), end; it != end; ++it)
-	{
-		std::string const& id = (*it)[1];
-		load_file(isolate, modules, id, p / id, base);
-	}
+void package::load_file(modules_map& modules, sources_map& sources, std::string const& id, path const& p)
+{
+	sources.emplace(p.base(), p.content());
+	modules.emplace(id, p.base());
 }

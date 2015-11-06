@@ -3,15 +3,19 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <cassert>
 #include <algorithm>
 #include <vector>
+#include <fstream>
 
 #ifdef _WIN32
+#include <io.h>
 #include <direct.h>
 static char const path_sep = '\\';
 #define get_current_dir_name() _getcwd(nullptr, 0)
 #else
 #include <unistd.h>
+#include <dirent.h>
 static char const path_sep = '/';
 #endif
 
@@ -106,14 +110,13 @@ std::string path::extension() const
 	return pos == string::npos? "" : base_str.substr(pos);
 }
 
-void path::set_extension(std::string const& ext)
+void path::add_extension(std::string const& ext)
 {
-	strings parts = split(str_);
-	if (!parts.empty())
+	std::pair<path, path> p = parts();
+	string& base = p.second.str_;
+	if (!base.empty() && base.find_last_of('.') == string::npos)
 	{
-		string& last = parts.back();
-		last = last.substr(0, last.find_last_of('.')) + ext;
-		str_ = join(parts);
+		str_ = p.first.str_ + path_sep + base + ext;
 	}
 }
 
@@ -135,6 +138,56 @@ path path::relative_to(path const& base) const
 	strings result(same_size > bparts.size() ? same_size - bparts.size() : 0, "..");
 	result.insert(result.end(), parts.begin() + same_size, parts.end());
 	return path(join(result));
+}
+
+std::vector<path> path::list_files() const
+{
+	assert(is_dir());
+	std::vector<path> result;
+#ifdef _WIN32
+	std::string const filename = str_ + path_sep + '*';
+	_finddata_t data;
+	intptr_t find = _findfirst(filename.c_str(), &data);
+	if (find != -1)
+	{
+		do
+		{
+			if (strncmp(data.name, ".", 1) == 0 || strncmp(data.name, "..", 2) == 0) continue;
+			std::string const name = str_ + path_sep + data.name;
+			if (data.attrib & _A_SUBDIR)
+			{
+				std::vector<path> const sub = path(name).list_files();
+				result.insert(result.end(), sub.begin(), sub.end());
+			}
+			else result.emplace_back(name);
+		}
+		while (_findnext(find, &data) == 0);
+		_findclose(find);
+	}
+#else
+	DIR* dir = opendir(str_.c_str());
+	if (dir)
+	{
+		while (struct dirent* entry = readdir(dir))
+		{
+			result.emplace_back(entry->d_name);
+		}
+		closedir(dir);
+	}
+#endif
+	return result;
+}
+
+std::string path::content() const
+{
+	assert(is_file());
+	std::ifstream file(str_.c_str());
+	if (!file.is_open())
+	{
+		throw std::runtime_error("can't open " + str_);
+	}
+	std::istreambuf_iterator<char> begin(file), end;
+	return std::string(begin, end);
 }
 
 path path::current()
