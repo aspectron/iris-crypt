@@ -41,9 +41,13 @@ static void init(v8::Handle<v8::Object>, v8::Handle<v8::Object> module)
 	v8pp::module exports(isolate);
 	exports
 		.set("Package", package_class)
+#ifdef IRIS_ENCRYPT
 		.set("generateAuth", package::gen_auth)
 		.set("package", package::make)
+#endif
+#ifdef IRIS_DECRYPT
 		.set("load", package::load)
+#endif
 		;
 
 	v8pp::set_option(isolate, module, "exports", exports.new_instance());

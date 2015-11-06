@@ -1,20 +1,36 @@
 # iris-crypt
 
-Encrypt Node.js modules into a single package file.
+Store Node.js modules encrypted in a package file.
 
 **Requires: Node.js version 0.12**
 
 ## Using
 
-See [`test.js`](./tests/test.js) for usage example.
+The module is indented to create an encrypted package with several Node.js modules
+and to use these modules from the package file.
+
+See [`encrypt.js`](./tests/test.js) and [`decrypt.js`](./tests/decrypt.js) for usage example.
 
 ## Documentation
 
-The module exports these functions:
+The module consists of two binary parts exporting following functions:
 
-  * `generateAuth()` - generate authorization key
-  * `package()` - create encrypted package
-  * `load()` - load encrypted package
+  - Encrypt part (allowed only if `iris-encrypt.node` addon exists)
+    * `generateAuth()` - generate authorization key
+    * `package()` - create encrypted package
+
+  - Decrypt part (in `iris-decrypt.node` addon)
+    * `load()` - load encrypted package
+
+Publisher encrypts a set of JavaScript files and modules into single package
+file with generated authorization key.
+
+Client loads the package with the supplied authorization key and use `require()`
+function to load a particular module.
+
+```
+var irisCrypt = require('iris-crypt');
+```
 
 ### generateAuth(serial)
 
@@ -49,11 +65,20 @@ the package.
 
 ```
 var pkg = irisCrypt.load(auth, 'some/where/filename.pkg');
+```
 
+### Package.require(name)
+
+Load a module stored in the package. This function fallbacks to original Node.js
+`require()` function, if there is no such a module.
+
+```
 var module1 = pkg.require('module1_name');
 // use exports from module1
 
 var module2 = pkg.require('module2_name');
+
+var fs = pkg.require('fs'); // load native Node.js module
 ```
 
 ### Package.key
@@ -73,7 +98,6 @@ Read-only property.
 ```
 var sn = pkg.serial; // 1234
 ```
-
 
 ### Package.names
 
