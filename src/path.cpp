@@ -17,6 +17,9 @@ static char const path_sep = '\\';
 #include <unistd.h>
 #include <dirent.h>
 static char const path_sep = '/';
+#ifndef __linux__
+#define get_current_dir_name() getcwd(nullptr, 0)
+#endif
 #endif
 
 using std::string;
@@ -28,7 +31,7 @@ static strings split(string const& str)
 	string::size_type start = 0, end = 0;
 	while ((end = str.find(path_sep, start)) != str.npos)
 	{
-		if (end != start) result.emplace_back(str.substr(start, end - start));
+		if (end != start || start == 0) result.emplace_back(str.substr(start, end - start));
 		start = end + 1;
 	}
 	if (end != start) result.emplace_back(str.substr(start, end - start));
@@ -39,10 +42,10 @@ template<typename It>
 static string join(It begin, It end)
 {
 	string result;
-	for (; begin != end; ++begin)
+	for (It it = begin; it != end; ++it)
 	{
-		if (!result.empty()) result += path_sep;
-		result += *begin;
+		if (it != begin) result += path_sep;
+		result += *it;
 	}
 	return result;
 }
@@ -78,14 +81,16 @@ bool path::is_file() const
 
 void path::normalize()
 {
+	if (str_.empty()) return;
+
 #ifdef _WIN32
 	std::replace(str_.begin(), str_.end(), '/', '\\');
 #endif
-
 	strings parts;
 	for (string const& part : split(str_))
 	{
-		if (part == "." || part.empty()) continue;
+		if (part.empty() && !parts.empty()) continue;
+		if (part == ".") continue;
 		if (part == ".." && !parts.empty())
 		{
 			parts.pop_back();
@@ -168,9 +173,16 @@ std::vector<path> path::list_files() const
 	DIR* dir = opendir(str_.c_str());
 	if (dir)
 	{
-		while (struct dirent* entry = readdir(dir))
+		while (struct dirent const* entry = readdir(dir))
 		{
-			result.emplace_back(entry->d_name);
+			if (entry->d_name[0] == '.') continue;
+			std::string const name = str_ + path_sep + entry->d_name;
+			if (entry->d_type == DT_DIR)
+			{
+				std::vector<path> const sub = path(name).list_files();
+				result.insert(result.end(), sub.begin(), sub.end());
+			}
+			else if (entry->d_type == DT_REG) result.emplace_back(name);
 		}
 		closedir(dir);
 	}
