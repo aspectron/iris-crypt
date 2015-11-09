@@ -3,10 +3,10 @@ var path = require('path');
 
 console.log('crypt exports:', crypt);
 
-var serial = 1234;
-if (process.argv.length > 2) serial = +process.argv[2];
+var password = process.argv[2] || 'password';
+var serial = +process.argv[3] || 1234;
 
-var auth = crypt.generateAuth(serial);
+var auth = crypt.generateAuth(password, serial);
 var filename = 'test.pkg';
 
 console.log('');

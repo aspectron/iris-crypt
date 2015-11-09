@@ -31,6 +31,7 @@ public:
 private:
 	std::string pub_key_;
 	uint16_t serial_number_;
+
 	v8::UniquePersistent<v8::Object> js_modules_;
 
 	using sources_map = std::unordered_map<path, std::string>;

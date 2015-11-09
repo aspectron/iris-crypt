@@ -37,14 +37,16 @@ function to load a particular module.
 var irisCrypt = require('iris-crypt');
 ```
 
-### generateAuth(serial)
+### generateAuth(password, serial)
 
-Create an authorization key string based on a `serial` number.
-The serial number must be in a range [0..65535].
+Create an authorization key string based on a `password` string
+and `serial` number. The serial number must be in a range [0..65535].
 
 ```
+var password = 'zzz';
 var serial = 1234;
-var auth = irisCrypt.makeAuth(serial); // auth = 'XXXX-XXXX-XXXX-XXXX-YYYY-ZZZZ'
+var auth = irisCrypt.makeAuth(password, serial);
+// assert(auth == 'EK4Z-3Z1E-SE4J-ANMZ-X390-917Z')
 ```
 
 ### package(auth, filename, files)

@@ -109,12 +109,13 @@ class auth_data
 {
 	// XXXX-XXXX-XXXX-XXXX-YYYY-ZZZZ
 public:
-	auth_data(v8::Isolate* isolate, uint16_t serial_number)
+	auth_data(v8::Isolate* isolate, std::string const& password, uint16_t serial_number)
 	{
+		std::string const salt((char*)&serial_number, sizeof(serial_number));
 		// XXXX
-		data_ = pbkdf2(isolate, "irisCrypt", std::to_string(serial_number), 1000, 11);
+		data_ = pbkdf2(isolate, password, salt, 1000, PRIV_KEY_LEN);
 		// YYYY
-		data_.append((char*)&serial_number, sizeof(serial_number));
+		data_.append(salt);
 		// ZZZZ
 		uint16_t const checksum = std::accumulate(data_.begin(), data_.end(), uint16_t{});
 		data_.append((char*)&checksum, sizeof(checksum));
@@ -126,12 +127,15 @@ public:
 		data_ = base32::decode<base32::crockford>(str);
 	}
 
-	std::string to_string() const
+	std::string to_string(size_t const group_by = 4) const
 	{
 		std::string result = base32::encode<base32::crockford>(data_);
-		for (auto pos = result.begin() + 4; pos < result.end();)
+		if (group_by)
 		{
-			pos = result.insert(pos, '-') + 5;
+			for (auto pos = result.begin() + group_by; pos < result.end();)
+			{
+				pos = result.insert(pos, '-') + group_by + 1;
+			}
 		}
 		return result;
 	}
@@ -142,6 +146,7 @@ public:
 		memcpy(&number, data_.data() + PRIV_KEY_LEN, sizeof(number));
 		return number;
 	}
+
 	std::string pub_key_string() const { return to_string().substr(20); }
 
 	std::string pub_key() const { return data_.substr(PRIV_KEY_LEN); }
@@ -157,8 +162,10 @@ void package::gen_auth(v8::FunctionCallbackInfo<v8::Value> const& args)
 {
 	v8::Isolate* isolate = args.GetIsolate();
 
-	uint16_t const serial = v8pp::from_v8<uint16_t>(isolate, args[0], 0);
-	auth_data const auth(isolate, serial);
+	std::string const password = v8pp::from_v8<std::string>(isolate, args[0]);
+	uint16_t const serial = v8pp::from_v8<uint16_t>(isolate, args[1]);
+
+	auth_data const auth(isolate, password, serial);
 
 	args.GetReturnValue().Set(v8pp::to_v8(isolate, auth.to_string()));
 }
