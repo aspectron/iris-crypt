@@ -54,6 +54,17 @@ static std::string random_bytes(v8::Isolate* isolate, size_t size)
 	return std::string(node::Buffer::Data(buf), node::Buffer::Length(buf));
 }
 
+static v8::Local<v8::Value> use_buffer(v8::Isolate* isolate, char const* data, size_t size)
+{
+#if NODE_MAJOR_VERSION < 3
+	return node::Buffer::New(isolate, data, size);
+#else
+	// MaybeLocal has appeared in io.js version 3.0.0
+	return node::Buffer::New(isolate, const_cast<char*>(data), size,
+		[](char* data, void* hint){}, nullptr).ToLocalChecked();
+#endif
+}
+
 static yas::shared_buffer do_crypto(v8::Isolate* isolate, char const* function,
 	std::string const& priv_key, char const* data, size_t size)
 {
@@ -69,7 +80,7 @@ static yas::shared_buffer do_crypto(v8::Isolate* isolate, char const* function,
 	v8pp::get_option(isolate, cipher, "update", update);
 	v8pp::get_option(isolate, cipher, "final", final);
 
-	v8::Local<v8::Value> buf1 = v8pp::call_v8(isolate, update, cipher, node::Buffer::New(isolate, data, size));
+	v8::Local<v8::Value> buf1 = v8pp::call_v8(isolate, update, cipher, use_buffer(isolate, data, size));
 	v8::Local<v8::Value> buf2 = v8pp::call_v8(isolate, final, cipher);
 
 	char const* const buf1_data = node::Buffer::Data(buf1);

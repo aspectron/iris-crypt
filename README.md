@@ -2,7 +2,12 @@
 
 Store Node.js modules encrypted in a package file.
 
-**Requires: Node.js version 0.12**
+**Requires: Node.js version >=0.12**
+
+## Building
+
+Run `npm rebuild` to build native addon from the project sources. Additional
+command line option `--target` allows to set specific Node.js version.
 
 ## Using
 

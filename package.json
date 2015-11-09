@@ -4,5 +4,5 @@
     "description": "Store Node.js modules encrypted in a package file",
     "private": true,
     "main": "./index.js",
-    "engines" : { "node" : "0.12" }
+    "engines" : { "node" : ">=0.12" }
 }
