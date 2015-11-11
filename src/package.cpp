@@ -65,24 +65,45 @@ static v8::Local<v8::Value> use_buffer(v8::Isolate* isolate, char const* data, s
 #endif
 }
 
-static yas::shared_buffer do_crypto(v8::Isolate* isolate, char const* function,
-	std::string const& priv_key, char const* data, size_t size)
+static yas::shared_buffer do_crypt(v8::Isolate* isolate, char const* name, bool encrypt,
+	std::string const& key, std::string const& iv,
+	yas::shared_buffer* auth_tag, char const* data, size_t size)
 {
+	char const* const create_name = (encrypt ? "createCipheriv" : "createDecipheriv");
+
 	v8::HandleScope scope(isolate);
 
 	v8::Local<v8::Object> crypto = v8pp::to_local(isolate, package::node_crypto);
 
 	v8::Local<v8::Function> create;
-	v8pp::get_option(isolate, crypto, function, create);
+	v8pp::get_option(isolate, crypto, create_name, create);
 
-	v8::Local<v8::Object> cipher = v8pp::call_v8(isolate, create, crypto, "aes256", priv_key).As<v8::Object>();
+	v8::Local<v8::Object> cipher = v8pp::call_v8(isolate, create, crypto, name,
+		use_buffer(isolate, key.data(), key.size()), use_buffer(isolate, iv.data(), iv.size())).As<v8::Object>();
+	if (!encrypt && auth_tag)
+	{
+		v8::Local<v8::Function> set_auth_tag;
+		v8pp::get_option(isolate, cipher, "setAuthTag", set_auth_tag);
+		v8pp::call_v8(isolate, set_auth_tag, cipher, use_buffer(isolate, auth_tag->data.get(), auth_tag->size));
+	}
 	v8::Local<v8::Function> update, final;
 	v8pp::get_option(isolate, cipher, "update", update);
 	v8pp::get_option(isolate, cipher, "final", final);
 
 	v8::Local<v8::Value> buf1 = v8pp::call_v8(isolate, update, cipher, use_buffer(isolate, data, size));
 	v8::Local<v8::Value> buf2 = v8pp::call_v8(isolate, final, cipher);
+	if (buf1.IsEmpty() || buf2.IsEmpty())
+	{
+		throw std::runtime_error(encrypt? "encryption failed" : "decryption failed");
+	}
 
+	if (encrypt && auth_tag)
+	{
+		v8::Local<v8::Function> get_auth_tag;
+		v8pp::get_option(isolate, cipher, "getAuthTag", get_auth_tag);
+		v8::Local<v8::Value> tag_buf = v8pp::call_v8(isolate, get_auth_tag, cipher);
+		auth_tag->assign(node::Buffer::Data(tag_buf), node::Buffer::Length(tag_buf));
+	}
 	char const* const buf1_data = node::Buffer::Data(buf1);
 	char const* const buf2_data = node::Buffer::Data(buf2);
 	size_t const buf1_size = node::Buffer::Length(buf1);
@@ -95,25 +116,36 @@ static yas::shared_buffer do_crypto(v8::Isolate* isolate, char const* function,
 	return result;
 }
 
-static yas::shared_buffer encrypt(v8::Isolate* isolate, std::string const& priv_key, char const* data, size_t size)
+static yas::shared_buffer encrypt(v8::Isolate* isolate, std::string const& key, std::string& iv,
+	yas::shared_buffer& auth_tag, char const* data, size_t size)
 {
-	return do_crypto(isolate, "createCipher", priv_key, data, size);
+	assert(key.size() == 128 / 8);
+	iv = random_bytes(isolate, 96 / 8);
+	return do_crypt(isolate, "aes-128-gcm", true, key, iv, &auth_tag, data, size);
 }
 
-static yas::shared_buffer decrypt(v8::Isolate* isolate, std::string const& priv_key, char const* data, size_t size)
+static yas::shared_buffer decrypt(v8::Isolate* isolate, std::string const& key, std::string const& iv,
+	yas::shared_buffer& auth_tag, char const* data, size_t size)
 {
-	return do_crypto(isolate, "createDecipher", priv_key, data, size);
+	assert(key.size() == 128 / 8);
+	assert(iv.size() == 96 / 8);
+	return do_crypt(isolate, "aes-128-gcm", false, key, iv, &auth_tag, data, size);
 }
 
+// Auth key like XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-YYYY-ZZZZ
 class auth_data
 {
-	// XXXX-XXXX-XXXX-XXXX-YYYY-ZZZZ
+	// result string is in Base32, so binary data should be
+	// a multipler for 40 bit block.
+	static size_t const KEY_LEN = 16;
+	static size_t const AUTH_LEN = KEY_LEN + sizeof(uint16_t) * 2; // + serial + checksum
+	std::string data_;
 public:
 	auth_data(v8::Isolate* isolate, std::string const& password, uint16_t serial_number)
 	{
 		std::string const salt((char*)&serial_number, sizeof(serial_number));
 		// XXXX
-		data_ = pbkdf2(isolate, password, salt, 1000, PRIV_KEY_LEN);
+		data_ = pbkdf2(isolate, password, salt, 1000, KEY_LEN);
 		// YYYY
 		data_.append(salt);
 		// ZZZZ
@@ -124,7 +156,14 @@ public:
 	explicit auth_data(std::string str)
 	{
 		str.erase(std::remove(str.begin(), str.end(), '-'), str.end());
-		data_ = base32::decode<base32::crockford>(str);
+		try { data_ = base32::decode<base32::crockford>(str); }
+		catch (std::exception const&) {};
+
+		if (data_.size() != AUTH_LEN
+			|| checksum() != std::accumulate(data_.begin(), data_.end() - sizeof(uint16_t), uint16_t{}))
+		{
+			throw std::runtime_error("invalid auth data");
+		}
 	}
 
 	std::string to_string(size_t const group_by = 4) const
@@ -142,20 +181,20 @@ public:
 
 	uint16_t serial_number() const
 	{
-		uint16_t number;
-		memcpy(&number, data_.data() + PRIV_KEY_LEN, sizeof(number));
-		return number;
+		uint16_t result;
+		memcpy(&result, data_.data() + KEY_LEN, sizeof(result));
+		return result;
 	}
 
-	std::string pub_key_string() const { return to_string().substr(20); }
+	uint16_t checksum() const
+	{
+		uint16_t result;
+		memcpy(&result, data_.data() + KEY_LEN + sizeof(uint16_t), sizeof(result));
+		return result;
+	}
 
-	std::string pub_key() const { return data_.substr(PRIV_KEY_LEN); }
-	std::string priv_key() const { return data_.substr(0, PRIV_KEY_LEN); }
-private:
-	static size_t const PRIV_KEY_LEN = 11;
-	static size_t const AUTH_LEN = PRIV_KEY_LEN + sizeof(uint16_t) * 2; // + serial + checksum
-
-	std::string data_;
+	std::string pub_data() const { return data_.substr(KEY_LEN); }
+	std::string priv_key() const { return data_.substr(0, KEY_LEN); }
 };
 
 void package::gen_auth(v8::FunctionCallbackInfo<v8::Value> const& args)
@@ -170,6 +209,7 @@ void package::gen_auth(v8::FunctionCallbackInfo<v8::Value> const& args)
 	args.GetReturnValue().Set(v8pp::to_v8(isolate, auth.to_string()));
 }
 
+#ifdef IRIS_ENCRYPT
 void package::make(v8::FunctionCallbackInfo<v8::Value> const& args)
 try
 {
@@ -196,17 +236,21 @@ try
 	content.serialize(modules, sources);
 
 	yas::intrusive_buffer const buf = mem.get_intrusive_buffer();
-	yas::shared_buffer const cipher = encrypt(isolate, auth.priv_key(), buf.data, buf.size);
+	yas::shared_buffer auth_tag;
+	std::string iv;
+	yas::shared_buffer const cipher = encrypt(isolate, auth.priv_key(), iv, auth_tag, buf.data, buf.size);
 
 	yas::file_ostream file(filename.c_str(), yas::file_trunc);
 	yas::binary_oarchive<yas::file_ostream> out(file, yas::no_header);
-	out.serialize(SIGN, auth.pub_key(), cipher);
+	out.serialize(SIGN, auth.pub_data(), iv, auth_tag, cipher);
 }
 catch (yas::io_exception const& ex)
 {
 	throw std::runtime_error(std::string("Package write error: ") + ex.what());
 }
+#endif
 
+#ifdef IRIS_DECRYPT
 void package::load(v8::FunctionCallbackInfo<v8::Value> const& args)
 try
 {
@@ -215,26 +259,26 @@ try
 	auth_data const auth(v8pp::from_v8<std::string>(isolate, args[0]));
 	auto const filename = v8pp::from_v8<std::string>(isolate, args[1]);
 
-	std::unique_ptr<package> pkg(new package);
-
 	std::decay<decltype(SIGN)>::type sign;
-	yas::shared_buffer cipher;
+	std::string pub_data, iv;
+	yas::shared_buffer auth_tag, cipher;
 
 	yas::file_istream file(filename.c_str());
 	yas::binary_iarchive<yas::file_istream> in(file, yas::no_header);
-	in.serialize(sign, pkg->pub_key_, cipher);
+	in.serialize(sign, pub_data, iv, auth_tag, cipher);
 	if (sign != SIGN)
 	{
 		throw std::runtime_error("Package invalid format");
 	}
-	if (pkg->pub_key_ != auth.pub_key())
+	if (pub_data != auth.pub_data())
 	{
 		throw std::runtime_error("Package invalid key");
 	}
-	pkg->pub_key_ = auth.pub_key_string();
+
+	std::unique_ptr<package> pkg(new package);
 	pkg->serial_number_ = auth.serial_number();
 
-	yas::shared_buffer const plain = decrypt(isolate, auth.priv_key(), cipher.data.get(), cipher.size);
+	yas::shared_buffer const plain = decrypt(isolate, auth.priv_key(), iv, auth_tag, cipher.data.get(), cipher.size);
 	yas::mem_istream mem(plain);
 	yas::binary_iarchive<yas::mem_istream> content(mem, yas::no_header);
 	content.serialize(pkg->modules_, pkg->sources_);
@@ -248,6 +292,7 @@ catch (yas::io_exception const& ex)
 {
 	throw std::runtime_error(std::string("Package read error: ") + ex.what());
 }
+#endif
 
 std::vector<std::string> package::names() const
 {

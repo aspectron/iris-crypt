@@ -23,13 +23,11 @@ public:
 
 	void require(v8::FunctionCallbackInfo<v8::Value> const& args);
 
-	std::string const& key() const { return pub_key_; }
 	uint16_t serial() const { return serial_number_; }
 
 	std::vector<std::string> names() const;
 
 private:
-	std::string pub_key_;
 	uint16_t serial_number_;
 
 	v8::UniquePersistent<v8::Object> js_modules_;

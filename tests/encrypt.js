@@ -5,9 +5,9 @@ console.log('crypt exports:', crypt);
 
 var password = process.argv[2] || 'password';
 var serial = +process.argv[3] || 1234;
+var filename = process.argv[4] || 'test.pkg';
 
 var auth = crypt.generateAuth(password, serial);
-var filename = 'test.pkg';
 
 console.log('');
 console.log('generated auth for serial %s: %s', serial, auth);

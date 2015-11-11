@@ -88,15 +88,6 @@ var module2 = pkg.require('module2_name');
 var fs = pkg.require('fs'); // load native Node.js module
 ```
 
-### Package.key
-
-Public part of auth key that was used to create the package.
-Read-only property.
-
-```
-var key = pkg.key; // 'YYYY-ZZZZ' part of auth
-```
-
 ### Package.serial
 
 The serial number that was used for the package auth key generation.

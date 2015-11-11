@@ -34,7 +34,6 @@ static void init(v8::Handle<v8::Object>, v8::Handle<v8::Object> module)
 	v8pp::class_<package> package_class(isolate);
 	package_class
 		.set("require", &package::require)
-		.set("key", v8pp::property(&package::key))
 		.set("serial", v8pp::property(&package::serial))
 		.set("names", v8pp::property(&package::names))
 		;

@@ -4,14 +4,13 @@ var path = require('path');
 console.log('crypt exports:', crypt);
 
 var auth = process.argv[2];
-var filename = 'test.pkg';
+var filename = process.argv[3] || 'test.pkg';
 
 console.log('');
 console.log('using auth: %s', auth);
 
 var pkg = crypt.load(auth, filename);
-console.log('loaded  package %s:', filename, pkg);
-console.log('package %s key:', filename, pkg.key);
+console.log('loaded package %s:', filename, pkg);
 console.log('package %s serial:', filename, pkg.serial);
 console.log('package %s names:', filename, pkg.names);
 
