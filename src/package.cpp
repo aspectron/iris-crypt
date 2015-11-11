@@ -209,7 +209,6 @@ void package::gen_auth(v8::FunctionCallbackInfo<v8::Value> const& args)
 	args.GetReturnValue().Set(v8pp::to_v8(isolate, auth.to_string()));
 }
 
-#ifdef IRIS_ENCRYPT
 void package::make(v8::FunctionCallbackInfo<v8::Value> const& args)
 try
 {
@@ -248,9 +247,7 @@ catch (yas::io_exception const& ex)
 {
 	throw std::runtime_error(std::string("Package write error: ") + ex.what());
 }
-#endif
 
-#ifdef IRIS_DECRYPT
 void package::load(v8::FunctionCallbackInfo<v8::Value> const& args)
 try
 {
@@ -292,7 +289,6 @@ catch (yas::io_exception const& ex)
 {
 	throw std::runtime_error(std::string("Package read error: ") + ex.what());
 }
-#endif
 
 std::vector<std::string> package::names() const
 {

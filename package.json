@@ -1,6 +1,6 @@
 {
     "name": "iris-crypt",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "description": "Store Node.js modules encrypted in a package file",
     "private": true,
     "main": "./index.js",

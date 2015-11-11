@@ -3,13 +3,24 @@ var path = require('path');
 
 console.log('crypt exports:', crypt);
 
-var auth = process.argv[2];
-var filename = process.argv[3] || 'test.pkg';
+var password = process.argv[2] || 'password';
+var serial = +process.argv[3] || 1234;
+var filename = process.argv[4] || 'test.pkg';
 
+var auth = crypt.generateAuth(password, serial);
 console.log('');
-console.log('using auth: %s', auth);
+console.log('generated auth for serial %s: %s', serial, auth);
+
+crypt.package(auth, filename, {
+	'm1': path.join(__dirname, 'module1.js'),
+	'm2': path.join(__dirname, 'module2.js'),
+	'm3': path.join(__dirname, 'module3'),
+});
+console.log('');
+console.log('created package %s', filename);
 
 var pkg = crypt.load(auth, filename);
+console.log('');
 console.log('loaded package %s:', filename, pkg);
 console.log('package %s serial:', filename, pkg.serial);
 console.log('package %s names:', filename, pkg.names);
