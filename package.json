@@ -2,7 +2,10 @@
     "name": "iris-crypt",
     "version": "0.0.2",
     "description": "Store Node.js modules encrypted in a package file",
-    "private": true,
     "main": "./index.js",
-    "engines" : { "node" : ">=0.12" }
+    "engines" : { "node" : ">=0.12" },
+    "repository": "git://github.com/aspectron/iris-crypt.git",
+    "homepage": "https://github.com/aspectron/iris-crypt",
+    "bugs": { "url": "https://github.com/aspectron/iris-crypt/issues" },
+    "license": "MIT"
 }

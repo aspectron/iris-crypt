@@ -1,3 +1,12 @@
+#
+# Copyright (c) 2015 ASPECTRON Inc.
+# All Rights Reserved.
+#
+# This file is part of IrisCrypt (https://github.com/aspectron/iris-crypt) project.
+#
+# Distributed under the MIT software license, see the accompanying
+# file LICENSE
+#
 {
     'variables': {
         'modver_file':     'src/modver.js',
@@ -59,6 +68,7 @@
                         '<(root_dir)/tests/',
                         '<(root_dir)/index.js',
                         '<(root_dir)/package.json',
+                        '<(root_dir)/LICENSE',
                         '<(root_dir)/README.md',
                     ],
                 },
